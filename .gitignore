@@ -1,0 +1,70 @@
+# .gitignore for DemandForge
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Streamlit
+.streamlit/
+
+# Environment variables
+.env
+*.env
+!.env.example
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Logs
+*.log
+logs/
+
+# Data files (if storing locally)
+*.db
+*.sqlite
+*.sqlite3
+historical_demands.json
+
+# Uploads (if storing locally)
+uploads/
+wireframes/
+training_materials/
+
+# OS
+Thumbs.db
+.DS_Store
