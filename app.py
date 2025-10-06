@@ -6,24 +6,45 @@ Built for Salling Group to centralize documentation, stakeholder inputs, and art
 
 import streamlit as st
 import uuid
+import os
+import random
 from datetime import datetime
 import json
 import html
 from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Import local modules
+from utils.document_reader import DocumentReader, get_attachment_content
+from utils.gantt_chart import render_gantt_tab
+from components.jira_test_ui import (
+    render_jira_test_setup,
+    render_test_case_generator,
+    render_test_plan_generator
+)
+from components.ai_chat import render_ai_chat
 from models.demand import (
     Demand, IdeationTab, RequirementsTab, AssessmentTab, DesignTab,
     BuildTab, ValidationTab, DeploymentTab, ImplementationTab, ClosingTab,
     Stakeholder, AuditLogEntry, PowerInterest, RiskSeverity
 )
 from agents.mock_agent import MockAgent
+try:
+    from agents.gemini_agent import GeminiAgent
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    
 from integrations.jira_client import MockJiraClient
 from integrations.confluence_client import MockConfluenceClient
 from utils.progress import calculate_progress, is_tab_complete, get_completion_details
 from utils.export import export_to_json, export_to_markdown, generate_pdf_content
 from utils.validation import sanitize_html, validate_session_ttl, validate_input_length
 from utils.logging_config import setup_logging, StructuredLogger
+from utils.storage import get_storage
 
 # Page configuration
 st.set_page_config(
@@ -33,49 +54,244 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI
+# Custom CSS for modern, clean UI
 st.markdown("""
 <style>
+    /* Modern color scheme - Light Mode */
+    :root {
+        --primary: #2563eb;
+        --primary-dark: #1e40af;
+        --secondary: #64748b;
+        --success: #10b981;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+        --bg-card: #ffffff;
+        --bg-hover: #f1f5f9;
+        --border: #e2e8f0;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+    }
+    
+    /* Dark Mode Colors */
+    [data-theme="dark"] {
+        --primary: #60a5fa;
+        --primary-dark: #3b82f6;
+        --secondary: #94a3b8;
+        --success: #34d399;
+        --warning: #fbbf24;
+        --danger: #f87171;
+        --bg-card: #1e293b;
+        --bg-hover: #334155;
+        --border: #475569;
+        --text-primary: #f1f5f9;
+        --text-secondary: #cbd5e1;
+    }
+    
+    /* Auto-detect dark mode from Streamlit */
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --primary: #60a5fa;
+            --primary-dark: #3b82f6;
+            --secondary: #94a3b8;
+            --success: #34d399;
+            --warning: #fbbf24;
+            --danger: #f87171;
+            --bg-card: #1e293b;
+            --bg-hover: #334155;
+            --border: #475569;
+            --text-primary: #f1f5f9;
+            --text-secondary: #cbd5e1;
+        }
+    }
+    
+    /* Compact header - top left */
     .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        margin-bottom: 0.5rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--primary);
+        margin: 0;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+    }
+    .main-header-emoji {
+        font-size: 1rem;
     }
     .demand-id {
-        font-size: 1.2rem;
-        color: #666;
-        font-family: monospace;
+        font-size: 0.75rem;
+        color: var(--secondary);
+        font-family: 'Courier New', monospace;
+        font-weight: 500;
     }
     .progress-text {
-        font-size: 0.9rem;
-        color: #888;
+        font-size: 0.75rem;
+        color: var(--secondary);
+        font-weight: 500;
     }
+    
+    /* Reduce main content padding */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 100% !important;
+    }
+    
+    /* Modern tab styling */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 4px;
+        background-color: var(--bg-hover);
+        padding: 4px;
+        border-radius: 8px;
     }
     .stTabs [data-baseweb="tab"] {
-        padding: 10px 20px;
+        padding: 6px 12px;
+        font-size: 0.85rem;
+        border-radius: 6px;
+        font-weight: 500;
+        background-color: transparent;
+        color: var(--text-primary);
     }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: var(--bg-card);
+    }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background-color: var(--bg-card);
+    }
+    
+    /* Clean card styling */
+    .stForm {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        background: var(--bg-card) !important;
+    }
+    
+    /* Ensure all input fields respect dark mode */
+    .stTextInput > div > div > input,
+    .stTextArea > div > div > textarea,
+    .stSelectbox > div > div,
+    .stMultiSelect > div > div,
+    .stNumberInput > div > div > input {
+        background-color: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+        border-color: var(--border) !important;
+    }
+    
+    /* Compact headers */
+    h1 {
+        font-size: 1.5rem !important;
+        font-weight: 600 !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    h2 {
+        font-size: 1.2rem !important;
+        font-weight: 600 !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    h3 {
+        font-size: 1rem !important;
+        font-weight: 600 !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    
+    /* Clean dividers */
+    hr {
+        margin: 1rem 0 !important;
+        border-color: var(--border) !important;
+    }
+    
+    /* AI response styling */
     .ai-response {
-        background-color: #f0f2f6;
-        padding: 15px;
-        border-radius: 10px;
-        border-left: 4px solid #1f77b4;
+        background-color: var(--bg-hover);
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 3px solid var(--primary);
+        font-size: 0.9rem;
+        color: var(--text-primary);
     }
     .warning-box {
-        background-color: #fff3cd;
-        padding: 10px;
-        border-radius: 5px;
-        border-left: 4px solid #ffc107;
-        margin: 10px 0;
+        background-color: rgba(251, 191, 36, 0.1);
+        padding: 0.75rem;
+        border-radius: 8px;
+        border-left: 3px solid var(--warning);
+        margin: 0.5rem 0;
+        font-size: 0.85rem;
+        color: var(--text-primary);
     }
     .success-box {
-        background-color: #d4edda;
-        padding: 10px;
-        border-radius: 5px;
-        border-left: 4px solid #28a745;
-        margin: 10px 0;
+        background-color: rgba(52, 211, 153, 0.1);
+        padding: 0.75rem;
+        border-radius: 8px;
+        border-left: 3px solid var(--success);
+        margin: 0.5rem 0;
+        font-size: 0.85rem;
+        color: var(--text-primary);
+    }
+    
+    /* Ensure Streamlit widgets respect theme */
+    .stButton > button {
+        background-color: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+    .stButton > button:hover {
+        background-color: var(--bg-hover);
+        border-color: var(--primary);
+    }
+    
+    /* Compact buttons */
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 0.5rem 1rem;
+    }
+    
+    /* Chat container - right side */
+    .chat-sidebar {
+        position: fixed;
+        right: 0;
+        top: 0;
+        height: 100vh;
+        width: 380px;
+        background: white;
+        border-left: 1px solid var(--border);
+        z-index: 999;
+        transition: transform 0.3s ease;
+        display: flex;
+        flex-direction: column;
+    }
+    .chat-sidebar.minimized {
+        transform: translateX(340px);
+    }
+    .chat-toggle {
+        position: fixed;
+        right: 20px;
+        top: 20px;
+        z-index: 1000;
+        background: var(--primary);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 48px;
+        height: 48px;
+        cursor: pointer;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        font-size: 1.2rem;
+        transition: all 0.3s ease;
+    }
+    .chat-toggle:hover {
+        background: var(--primary-dark);
+        transform: scale(1.05);
+    }
+    
+    /* Reduce spacing */
+    .element-container {
+        margin-bottom: 0.5rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -88,8 +304,13 @@ st.markdown("""
 def initialize_session_state():
     """Initialize session state with default values."""
     if "initialized" not in st.session_state:
+        # Track actual session start time (not demand start time)
+        st.session_state.session_start_time = datetime.now()
+        
         # Generate unique demand ID
         st.session_state.demand_id = f"LOG-{datetime.now().year}-{str(uuid.uuid4())[:8].upper()}"
+        st.session_state.demand_name = ""
+        st.session_state.demand_number = ""
         st.session_state.start_time = datetime.now()
         st.session_state.last_modified = datetime.now()
         st.session_state.status = "Draft"
@@ -105,6 +326,19 @@ def initialize_session_state():
         st.session_state.implementation = {"success_metrics": {}}
         st.session_state.closing = {"sign_offs": {}}
         
+        # Initialize attachments for each phase
+        st.session_state.attachments = {
+            "ideation": {"files": [], "urls": []},
+            "requirements": {"files": [], "urls": []},
+            "assessment": {"files": [], "urls": []},
+            "design": {"files": [], "urls": []},
+            "build": {"files": [], "urls": []},
+            "validation": {"files": [], "urls": []},
+            "deployment": {"files": [], "urls": []},
+            "implementation": {"files": [], "urls": []},
+            "closing": {"files": [], "urls": []}
+        }
+        
         # Chat and audit
         st.session_state.chat_history = []
         st.session_state.audit_log = []
@@ -112,14 +346,39 @@ def initialize_session_state():
         # Progress
         st.session_state.progress_percentage = 0
         
-        # Agents and clients
-        st.session_state.agent = MockAgent()
+        # Initialize storage
+        st.session_state.storage = get_storage()
+        
+        # Load ALL historical demands for AI context
+        st.session_state.historical_demands = st.session_state.storage.get_all_demands_summary()
+        st.session_state.storage_stats = st.session_state.storage.get_statistics()
+        
+        # Initialize Logger FIRST (before agent initialization)
+        logger = setup_logging(trace_id=st.session_state.demand_id)
+        st.session_state.logger = StructuredLogger(logger, st.session_state.demand_id)
+        
+        # Initialize AI Agent (Gemini if available, else Mock)
+        use_gemini = os.getenv("USE_GEMINI", "false").lower() == "true"
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        
+        if GEMINI_AVAILABLE and use_gemini and gemini_key:
+            try:
+                st.session_state.agent = GeminiAgent(api_key=gemini_key)
+                st.session_state.agent_type = "Gemini AI"
+                st.session_state.logger.info("Initialized Gemini AI agent")
+            except Exception as e:
+                st.session_state.agent = MockAgent()
+                st.session_state.agent_type = "Mock (Gemini failed)"
+                st.session_state.logger.warning(f"Gemini init failed, using mock: {e}")
+        else:
+            st.session_state.agent = MockAgent()
+            st.session_state.agent_type = "Mock"
+            st.session_state.logger.info("Using Mock AI agent")
+        
+        # Other clients (don't override agent!)
         st.session_state.jira_client = MockJiraClient()
         st.session_state.confluence_client = MockConfluenceClient()
         
-        # Logger
-        logger = setup_logging(trace_id=st.session_state.demand_id)
-        st.session_state.logger = StructuredLogger(logger, st.session_state.demand_id)
         st.session_state.logger.info("Session initialized", demand_id=st.session_state.demand_id)
         
         st.session_state.initialized = True
@@ -137,6 +396,259 @@ def add_audit_entry(action: str, tab_name: Optional[str] = None, field_name: Opt
     }
     st.session_state.audit_log.append(entry)
     st.session_state.last_modified = datetime.now()
+    
+    # Auto-save after each change
+    save_current_demand()
+
+
+def save_current_demand():
+    """Save the current demand to persistent storage."""
+    demand_data = {
+        'demand_id': st.session_state.demand_id,
+        'demand_name': st.session_state.get('demand_name', ''),
+        'demand_number': st.session_state.get('demand_number', ''),
+        'start_time': st.session_state.start_time.isoformat() if hasattr(st.session_state.start_time, 'isoformat') else str(st.session_state.start_time),
+        'last_modified': st.session_state.last_modified.isoformat() if hasattr(st.session_state.last_modified, 'isoformat') else str(st.session_state.last_modified),
+        'status': st.session_state.status,
+        'progress_percentage': st.session_state.progress_percentage,
+        'ideation': st.session_state.ideation,
+        'requirements': st.session_state.requirements,
+        'assessment': st.session_state.assessment,
+        'design': st.session_state.design,
+        'build': st.session_state.build,
+        'validation': st.session_state.validation,
+        'deployment': st.session_state.deployment,
+        'implementation': st.session_state.implementation,
+        'closing': st.session_state.closing,
+        'attachments': st.session_state.get('attachments', {}),
+        'audit_log': st.session_state.audit_log,
+        'chat_history': st.session_state.chat_history,
+    }
+    
+    st.session_state.storage.save_demand(demand_data)
+    
+    # Refresh historical demands for AI context
+    st.session_state.historical_demands = st.session_state.storage.get_all_demands_summary()
+    st.session_state.storage_stats = st.session_state.storage.get_statistics()
+
+
+def load_demand_by_id(demand_id: str):
+    """Load an existing demand by ID into session state."""
+    try:
+        # Only save current demand if it has been modified (has content or audit entries)
+        # This prevents creating empty demand files when just browsing
+        has_content = (
+            st.session_state.get('demand_name', '') or
+            st.session_state.ideation or
+            st.session_state.requirements.get('stakeholders') or
+            st.session_state.assessment or
+            st.session_state.design or
+            st.session_state.build.get('tasks') or
+            st.session_state.validation or
+            st.session_state.deployment or
+            st.session_state.implementation or
+            st.session_state.closing or
+            len(st.session_state.audit_log) > 0 or
+            len(st.session_state.chat_history) > 0
+        )
+        
+        if has_content:
+            # Save current demand first (without triggering auto-save chain)
+            current_demand_data = {
+                'demand_id': st.session_state.demand_id,
+                'start_time': st.session_state.start_time.isoformat() if hasattr(st.session_state.start_time, 'isoformat') else str(st.session_state.start_time),
+                'last_modified': st.session_state.last_modified.isoformat() if hasattr(st.session_state.last_modified, 'isoformat') else str(st.session_state.last_modified),
+                'status': st.session_state.status,
+                'progress_percentage': st.session_state.progress_percentage,
+                'ideation': st.session_state.ideation,
+                'requirements': st.session_state.requirements,
+                'assessment': st.session_state.assessment,
+                'design': st.session_state.design,
+                'build': st.session_state.build,
+                'validation': st.session_state.validation,
+                'deployment': st.session_state.deployment,
+                'implementation': st.session_state.implementation,
+                'closing': st.session_state.closing,
+                'audit_log': st.session_state.audit_log,
+                'chat_history': st.session_state.chat_history,
+            }
+            st.session_state.storage.save_demand(current_demand_data)
+        
+        # Load the new demand
+        demand_data = st.session_state.storage.load_demand(demand_id)
+        
+        if demand_data:
+            # Parse timestamps
+            start_time = demand_data.get('start_time')
+            if isinstance(start_time, str):
+                start_time = datetime.fromisoformat(start_time)
+            
+            last_modified = demand_data.get('last_modified')
+            if isinstance(last_modified, str):
+                last_modified = datetime.fromisoformat(last_modified)
+            
+            # Update session state - do this without triggering reruns
+            st.session_state.demand_id = demand_data.get('demand_id')
+            st.session_state.demand_name = demand_data.get('demand_name', '')
+            st.session_state.demand_number = demand_data.get('demand_number', '')
+            st.session_state.start_time = start_time
+            st.session_state.last_modified = last_modified
+            st.session_state.status = demand_data.get('status', 'Draft')
+            st.session_state.progress_percentage = demand_data.get('progress_percentage', 0)
+            st.session_state.ideation = demand_data.get('ideation', {})
+            st.session_state.requirements = demand_data.get('requirements', {})
+            st.session_state.assessment = demand_data.get('assessment', {})
+            st.session_state.design = demand_data.get('design', {})
+            st.session_state.build = demand_data.get('build', {})
+            st.session_state.validation = demand_data.get('validation', {})
+            st.session_state.deployment = demand_data.get('deployment', {})
+            st.session_state.implementation = demand_data.get('implementation', {})
+            st.session_state.closing = demand_data.get('closing', {})
+            st.session_state.attachments = demand_data.get('attachments', {
+                "ideation": {"files": [], "urls": []},
+                "requirements": {"files": [], "urls": []},
+                "assessment": {"files": [], "urls": []},
+                "design": {"files": [], "urls": []},
+                "build": {"files": [], "urls": []},
+                "validation": {"files": [], "urls": []},
+                "deployment": {"files": [], "urls": []},
+                "implementation": {"files": [], "urls": []},
+                "closing": {"files": [], "urls": []}
+            })
+            st.session_state.audit_log = demand_data.get('audit_log', [])
+            st.session_state.chat_history = demand_data.get('chat_history', [])
+            
+            # Refresh historical demands
+            st.session_state.historical_demands = st.session_state.storage.get_all_demands_summary()
+            st.session_state.storage_stats = st.session_state.storage.get_statistics()
+            
+            # Set a flag to show success message after rerun
+            st.session_state.load_success_message = f"✅ Successfully loaded demand: {demand_id}"
+            
+            return True
+        else:
+            st.session_state.load_error_message = f"❌ Could not load demand: {demand_id}"
+            return False
+    except Exception as e:
+        st.session_state.load_error_message = f"❌ Error loading demand: {str(e)}"
+        return False
+
+
+def create_new_demand():
+    """Create a new demand and reset session state."""
+    try:
+        # Only save current demand if it has been modified (has content or audit entries)
+        # This prevents creating empty demand files when just browsing
+        has_content = (
+            st.session_state.get('demand_name', '') or
+            st.session_state.ideation or
+            st.session_state.requirements.get('stakeholders') or
+            st.session_state.assessment or
+            st.session_state.design or
+            st.session_state.build.get('tasks') or
+            st.session_state.validation or
+            st.session_state.deployment or
+            st.session_state.implementation or
+            st.session_state.closing or
+            len(st.session_state.audit_log) > 0 or
+            len(st.session_state.chat_history) > 0
+        )
+        
+        if has_content:
+            # Save current demand first (without triggering auto-save chain)
+            current_demand_data = {
+                'demand_id': st.session_state.demand_id,
+                'demand_name': st.session_state.get('demand_name', ''),
+                'demand_number': st.session_state.get('demand_number', ''),
+                'start_time': st.session_state.start_time.isoformat() if hasattr(st.session_state.start_time, 'isoformat') else str(st.session_state.start_time),
+                'last_modified': st.session_state.last_modified.isoformat() if hasattr(st.session_state.last_modified, 'isoformat') else str(st.session_state.last_modified),
+                'status': st.session_state.status,
+                'progress_percentage': st.session_state.progress_percentage,
+                'ideation': st.session_state.ideation,
+                'requirements': st.session_state.requirements,
+                'assessment': st.session_state.assessment,
+                'design': st.session_state.design,
+                'build': st.session_state.build,
+                'validation': st.session_state.validation,
+                'deployment': st.session_state.deployment,
+                'implementation': st.session_state.implementation,
+                'closing': st.session_state.closing,
+                'audit_log': st.session_state.audit_log,
+                'chat_history': st.session_state.chat_history,
+            }
+            st.session_state.storage.save_demand(current_demand_data)
+        
+        # Generate new demand ID
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        random_suffix = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=4))
+        new_demand_id = f"LOG-{datetime.now().year}-{random_suffix}"
+        
+        # Reset session state
+        st.session_state.demand_id = new_demand_id
+        st.session_state.demand_name = ""
+        st.session_state.demand_number = ""
+        st.session_state.start_time = datetime.now()
+        st.session_state.last_modified = datetime.now()
+        st.session_state.status = "Draft"
+        st.session_state.progress_percentage = 0
+        st.session_state.ideation = {}
+        st.session_state.requirements = {}
+        st.session_state.assessment = {}
+        st.session_state.design = {}
+        st.session_state.build = {}
+        st.session_state.validation = {}
+        st.session_state.deployment = {}
+        st.session_state.implementation = {}
+        st.session_state.closing = {}
+        st.session_state.attachments = {
+            "ideation": {"files": [], "urls": []},
+            "requirements": {"files": [], "urls": []},
+            "assessment": {"files": [], "urls": []},
+            "design": {"files": [], "urls": []},
+            "build": {"files": [], "urls": []},
+            "validation": {"files": [], "urls": []},
+            "deployment": {"files": [], "urls": []},
+            "implementation": {"files": [], "urls": []},
+            "closing": {"files": [], "urls": []}
+        }
+        st.session_state.audit_log = []
+        st.session_state.chat_history = []
+        
+        # Save the new empty demand
+        new_demand_data = {
+            'demand_id': new_demand_id,
+            'demand_name': '',
+            'demand_number': '',
+            'start_time': st.session_state.start_time.isoformat(),
+            'last_modified': st.session_state.last_modified.isoformat(),
+            'status': st.session_state.status,
+            'progress_percentage': st.session_state.progress_percentage,
+            'ideation': st.session_state.ideation,
+            'requirements': st.session_state.requirements,
+            'assessment': st.session_state.assessment,
+            'design': st.session_state.design,
+            'build': st.session_state.build,
+            'validation': st.session_state.validation,
+            'deployment': st.session_state.deployment,
+            'implementation': st.session_state.implementation,
+            'closing': st.session_state.closing,
+            'attachments': st.session_state.attachments,
+            'audit_log': st.session_state.audit_log,
+            'chat_history': st.session_state.chat_history,
+        }
+        st.session_state.storage.save_demand(new_demand_data)
+        
+        # Refresh historical demands
+        st.session_state.historical_demands = st.session_state.storage.get_all_demands_summary()
+        st.session_state.storage_stats = st.session_state.storage.get_statistics()
+        
+        # Set success message
+        st.session_state.create_success_message = f"✅ Created new demand: {new_demand_id}"
+        
+        return new_demand_id
+    except Exception as e:
+        st.session_state.load_error_message = f"❌ Error creating demand: {str(e)}"
+        return None
 
 
 def update_progress():
@@ -156,13 +668,223 @@ def update_progress():
 
 
 # ============================================================================
+# ATTACHMENT MANAGEMENT
+# ============================================================================
+
+def save_uploaded_file(uploaded_file, phase_name: str):
+    """Save an uploaded file to the attachments directory."""
+    try:
+        # Create demand-specific directory
+        demand_dir = os.path.join("data", "attachments", st.session_state.demand_id)
+        os.makedirs(demand_dir, exist_ok=True)
+        
+        # Generate safe filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"{timestamp}_{uploaded_file.name}"
+        file_path = os.path.join(demand_dir, safe_filename)
+        
+        # Save file
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        # Create metadata
+        file_metadata = {
+            "filename": uploaded_file.name,
+            "stored_filename": safe_filename,
+            "file_path": file_path,
+            "file_size": uploaded_file.size,
+            "file_type": uploaded_file.type,
+            "uploaded_at": datetime.now().isoformat(),
+            "uploaded_by": "POC-User",
+            "phase": phase_name
+        }
+        
+        return file_metadata
+    except Exception as e:
+        st.error(f"Error saving file: {str(e)}")
+        return None
+
+
+def render_attachments_section(phase_name: str):
+    """Render the attachments section for a phase tab."""
+    st.divider()
+    st.subheader("📎 Attachments & References")
+    
+    # Initialize attachments if not exists
+    if phase_name not in st.session_state.attachments:
+        st.session_state.attachments[phase_name] = {"files": [], "urls": []}
+    
+    # Create two columns for files and URLs
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**📁 File Uploads**")
+        
+        # File uploader
+        uploaded_files = st.file_uploader(
+            "Upload documents (Word, Excel, PDF, etc.)",
+            type=["pdf", "docx", "xlsx", "pptx", "txt", "csv", "jpg", "png"],
+            accept_multiple_files=True,
+            key=f"file_upload_{phase_name}",
+            help="Upload relevant documents for this phase"
+        )
+        
+        if uploaded_files:
+            if st.button(f"💾 Save Files to {phase_name.title()}", key=f"save_files_{phase_name}"):
+                for uploaded_file in uploaded_files:
+                    file_metadata = save_uploaded_file(uploaded_file, phase_name)
+                    if file_metadata:
+                        st.session_state.attachments[phase_name]["files"].append(file_metadata)
+                
+                add_audit_entry(f"Added {len(uploaded_files)} file(s)", phase_name, "attachments")
+                st.success(f"✅ Saved {len(uploaded_files)} file(s)!")
+                st.rerun()
+        
+        # Display existing files
+        if st.session_state.attachments[phase_name]["files"]:
+            st.markdown("**Uploaded Files:**")
+            for idx, file_meta in enumerate(st.session_state.attachments[phase_name]["files"]):
+                with st.expander(f"📄 {file_meta['filename']} ({file_meta['file_size'] // 1024} KB)"):
+                    st.caption(f"Uploaded: {file_meta['uploaded_at'][:19]}")
+                    st.caption(f"Type: {file_meta['file_type']}")
+                    
+                    col_a, col_b = st.columns([3, 1])
+                    with col_a:
+                        if os.path.exists(file_meta['file_path']):
+                            with open(file_meta['file_path'], "rb") as f:
+                                st.download_button(
+                                    "⬇️ Download",
+                                    data=f.read(),
+                                    file_name=file_meta['filename'],
+                                    key=f"download_{phase_name}_{idx}"
+                                )
+                    with col_b:
+                        if st.button("🗑️ Remove", key=f"remove_file_{phase_name}_{idx}"):
+                            # Remove file from filesystem
+                            if os.path.exists(file_meta['file_path']):
+                                os.remove(file_meta['file_path'])
+                            # Remove from metadata
+                            st.session_state.attachments[phase_name]["files"].pop(idx)
+                            add_audit_entry(f"Removed file: {file_meta['filename']}", phase_name, "attachments")
+                            st.rerun()
+        else:
+            st.caption("No files uploaded yet.")
+    
+    with col2:
+        st.markdown("**🔗 URL References**")
+        
+        # URL input form
+        with st.form(f"url_form_{phase_name}"):
+            url_title = st.text_input(
+                "Reference Title",
+                placeholder="e.g., API Documentation",
+                max_chars=200,
+                key=f"url_title_{phase_name}"
+            )
+            url_link = st.text_input(
+                "URL",
+                placeholder="https://...",
+                max_chars=500,
+                key=f"url_link_{phase_name}"
+            )
+            url_description = st.text_area(
+                "Description (optional)",
+                placeholder="Brief description of what this reference contains",
+                max_chars=500,
+                key=f"url_desc_{phase_name}",
+                height=80
+            )
+            
+            submitted = st.form_submit_button("➕ Add URL")
+            
+            if submitted and url_title and url_link:
+                url_metadata = {
+                    "title": url_title,
+                    "url": url_link,
+                    "description": url_description,
+                    "added_at": datetime.now().isoformat(),
+                    "added_by": "POC-User",
+                    "phase": phase_name
+                }
+                
+                st.session_state.attachments[phase_name]["urls"].append(url_metadata)
+                add_audit_entry(f"Added URL: {url_title}", phase_name, "attachments")
+                st.success(f"✅ Added URL reference!")
+                st.rerun()
+        
+        # Display existing URLs
+        if st.session_state.attachments[phase_name]["urls"]:
+            st.markdown("**Saved References:**")
+            for idx, url_meta in enumerate(st.session_state.attachments[phase_name]["urls"]):
+                with st.expander(f"🔗 {url_meta['title']}"):
+                    st.markdown(f"**URL:** [{url_meta['url']}]({url_meta['url']})")
+                    if url_meta.get('description'):
+                        st.caption(f"Description: {url_meta['description']}")
+                    st.caption(f"Added: {url_meta['added_at'][:19]}")
+                    
+                    if st.button("🗑️ Remove", key=f"remove_url_{phase_name}_{idx}"):
+                        st.session_state.attachments[phase_name]["urls"].pop(idx)
+                        add_audit_entry(f"Removed URL: {url_meta['title']}", phase_name, "attachments")
+                        st.rerun()
+        else:
+            st.caption("No URL references added yet.")
+    
+    # AI assistance for reading attachments
+    st.divider()
+    if st.session_state.attachments[phase_name]["files"] or st.session_state.attachments[phase_name]["urls"]:
+        st.markdown("### 🤖 AI Document Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button(f"� Ask AI about attachments", key=f"ai_read_{phase_name}"):
+                with st.spinner("🤖 Reading documents and URLs..."):
+                    attachment_content = get_attachment_content(
+                        st.session_state.attachments[phase_name]["files"],
+                        st.session_state.attachments[phase_name]["urls"]
+                    )
+                    
+                    if attachment_content:
+                        query = f"Please summarize the key points from the attached documents and URLs in the {phase_name} phase."
+                        context = {
+                            "attachments": attachment_content,
+                            "phase": phase_name
+                        }
+                        
+                        response = st.session_state.agent.generate(query, context)
+                        
+                        with st.expander("📋 AI Summary", expanded=True):
+                            st.markdown(response)
+                            
+                        # Add to chat history
+                        st.session_state.chat_history.append({
+                            "role": "user",
+                            "content": query,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "content": response,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                    else:
+                        st.warning("Could not read attachment content")
+        
+        with col2:
+            st.caption("💡 **Tip:** The AI can now read your PDFs, Word docs, Excel files, and fetch web page content! Ask questions in the sidebar chat.")
+    else:
+        st.info("💡 Upload files or add URLs above, then use AI to analyze them!")
+
+
+# ============================================================================
 # HEADER
 # ============================================================================
 
 def render_header():
     """Render the application header with progress."""
-    # Check session TTL
-    is_valid, warning = validate_session_ttl(st.session_state.start_time)
+    # Check session TTL using actual session start time (not demand start time)
+    session_start = st.session_state.get('session_start_time', datetime.now())
+    is_valid, warning = validate_session_ttl(session_start)
     
     if not is_valid:
         st.error(warning)
@@ -174,26 +896,26 @@ def render_header():
     elif warning:
         st.warning(warning)
     
-    # Header
-    col1, col2 = st.columns([3, 1])
+    # Compact header - top left
+    col1, col2, col3 = st.columns([2, 3, 2])
     
     with col1:
-        st.markdown(f'<div class="main-header">🔨 DemandForge</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="demand-id">Demand ID: {st.session_state.demand_id}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header"><span class="main-header-emoji">🔨</span> DemandForge</div>', unsafe_allow_html=True)
+        demand_display = f"{st.session_state.demand_number} - {st.session_state.demand_name}" if st.session_state.demand_number and st.session_state.demand_name else st.session_state.demand_id
+        st.markdown(f'<div class="demand-id">{demand_display}</div>', unsafe_allow_html=True)
     
     with col2:
-        st.markdown(f"**Status:** {st.session_state.status}")
-        st.markdown(f"**Last Modified:** {st.session_state.last_modified.strftime('%H:%M:%S')}")
+        # Progress bar - centered
+        st.progress(st.session_state.progress_percentage / 100)
+        completed_tabs = int(st.session_state.progress_percentage / 100 * 9)
+        st.markdown(
+            f'<div class="progress-text" style="text-align: center;">Progress: {completed_tabs}/9 Tabs ({st.session_state.progress_percentage}%)</div>',
+            unsafe_allow_html=True
+        )
     
-    # Progress bar
-    st.progress(st.session_state.progress_percentage / 100)
-    completed_tabs = int(st.session_state.progress_percentage / 100 * 9)
-    st.markdown(
-        f'<div class="progress-text">Progress: {completed_tabs}/9 Tabs Complete ({st.session_state.progress_percentage}%)</div>',
-        unsafe_allow_html=True
-    )
-    
-    st.divider()
+    with col3:
+        # Status - right aligned
+        st.markdown(f'<div style="text-align: right; font-size: 0.8rem;"><strong>Status:</strong> {st.session_state.status}<br/><strong>Modified:</strong> {st.session_state.last_modified.strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
 
 # ============================================================================
@@ -201,98 +923,8 @@ def render_header():
 # ============================================================================
 
 def render_sidebar():
-    """Render the AI co-pilot sidebar."""
-    with st.sidebar:
-        st.header("🤖 AI Co-Pilot")
-        st.caption("Brainstorm, Generate, Refine")
-        
-        # Chat container
-        chat_container = st.container(height=400)
-        
-        with chat_container:
-            # Display recent messages (last 20)
-            for msg in st.session_state.chat_history[-20:]:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                
-                with st.chat_message(role):
-                    st.markdown(sanitize_html(content), unsafe_allow_html=False)
-        
-        # Chat input
-        user_query = st.chat_input("Ask me anything...", max_chars=1000)
-        
-        if user_query:
-            # Add user message
-            st.session_state.chat_history.append({
-                "role": "user",
-                "content": user_query,
-                "timestamp": datetime.now().isoformat()
-            })
-            
-            # Generate AI response
-            context = {
-                "demand_id": st.session_state.demand_id,
-                "ideation": st.session_state.ideation,
-                "requirements": st.session_state.requirements,
-                "assessment": st.session_state.assessment,
-                "design": st.session_state.design,
-                "build": st.session_state.build,
-                "validation": st.session_state.validation,
-                "deployment": st.session_state.deployment,
-                "implementation": st.session_state.implementation,
-                "closing": st.session_state.closing,
-                "current_tab": st.session_state.get("current_tab", "Ideation")
-            }
-            
-            response = st.session_state.agent.generate(
-                user_query,
-                context,
-                st.session_state.chat_history
-            )
-            
-            # Add AI response
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "content": response,
-                "timestamp": datetime.now().isoformat()
-            })
-            
-            add_audit_entry(f"AI query: {user_query[:50]}...")
-            st.rerun()
-        
-        st.divider()
-        
-        # Quick actions
-        st.subheader("Quick Actions")
-        
-        if st.button("💡 Generate User Stories"):
-            goals = st.session_state.ideation.get("goals", "")
-            stories = st.session_state.agent.suggest_stories(goals, context={})
-            st.session_state.requirements["user_stories"] = "\n\n".join(stories)
-            add_audit_entry("Generated user stories", "requirements", "user_stories")
-            st.success("User stories generated!")
-            st.rerun()
-        
-        if st.button("⚠️ Predict Risks"):
-            project_data = {
-                "assessment": st.session_state.assessment,
-                "requirements": st.session_state.requirements,
-                "design": st.session_state.design
-            }
-            risks = st.session_state.agent.predict_risks(project_data)
-            st.session_state.assessment["risks"] = risks
-            add_audit_entry("Generated risk predictions", "assessment", "risks")
-            st.success("Risk predictions generated!")
-            st.rerun()
-        
-        if st.button("🧪 Generate Test Cases"):
-            requirements = st.session_state.requirements.get("acceptance_criteria", "")
-            stories = st.session_state.requirements.get("user_stories", "")
-            tests = st.session_state.agent.generate_test_cases(requirements, stories)
-            st.session_state.validation["test_cases"] = tests
-            add_audit_entry("Generated test cases", "validation", "test_cases")
-            st.success("Test cases generated!")
-            st.rerun()
+    """Render the modern AI co-pilot sidebar."""
+    render_ai_chat()
 
 
 # ============================================================================
@@ -307,6 +939,29 @@ def render_ideation_tab():
     st.markdown("*Define the problem, goals, and context for this demand.*")
     
     with st.form("ideation_form"):
+        st.subheader("Demand Identification")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            demand_number = st.text_input(
+                "Demand Number",
+                value=st.session_state.demand_number,
+                placeholder="e.g., 10001",
+                max_chars=20,
+                help="Sequential demand number for tracking"
+            )
+        
+        with col2:
+            demand_name = st.text_input(
+                "Demand Name",
+                value=st.session_state.demand_name,
+                placeholder="e.g., Promotion Process Enhancement",
+                max_chars=200,
+                help="Descriptive name for this demand"
+            )
+        
+        st.divider()
+        
         st.subheader("Problem Statement")
         problem = st.text_area(
             "What problem are you solving?",
@@ -348,6 +1003,8 @@ def render_ideation_tab():
         submitted = st.form_submit_button("💾 Save Ideation", use_container_width=True)
         
         if submitted:
+            st.session_state.demand_number = demand_number
+            st.session_state.demand_name = demand_name
             st.session_state.ideation["problem_statement"] = problem
             st.session_state.ideation["goals"] = goals
             st.session_state.ideation["background"] = background
@@ -366,6 +1023,9 @@ def render_ideation_tab():
         
         with st.expander("💡 AI Suggestion", expanded=True):
             st.markdown(response)
+    
+    # Attachments section
+    render_attachments_section("ideation")
 
 
 # ============================================================================
@@ -481,6 +1141,9 @@ def render_requirements_tab():
             update_progress()
             st.success("✅ Requirements saved!")
             st.rerun()
+    
+    # Attachments section
+    render_attachments_section("requirements")
 
 
 # ============================================================================
@@ -582,6 +1245,9 @@ def render_assessment_tab():
         payback_months = duration * 4.33 if duration > 0 else 0
         
         st.info(f"💰 **ROI Summary:** Initial investment of €{cost:,.0f} with {roi}% ROI = €{expected_return:,.0f} return. Payback period: ~{payback_months:.0f} months")
+    
+    # Attachments section
+    render_attachments_section("assessment")
 
 
 # ============================================================================
@@ -661,6 +1327,9 @@ def render_design_tab():
     if uploaded_file:
         st.image(uploaded_file, caption="Uploaded Wireframe", use_container_width=True)
         st.info("💡 In production, files would be stored in cloud storage (Azure Blob, S3)")
+    
+    # Attachments section
+    render_attachments_section("design")
 
 
 # ============================================================================
@@ -783,6 +1452,9 @@ def render_build_tab():
             with st.expander("Created JIRA Items", expanded=True):
                 for item in items[-10:]:  # Show last 10
                     st.json(item)
+    
+    # Attachments section
+    render_attachments_section("build")
 
 
 # ============================================================================
@@ -851,6 +1523,12 @@ def render_validation_tab():
             st.success("✅ Validation saved!")
             st.rerun()
     
+    # JIRA Test Case Integration
+    st.divider()
+    render_jira_test_setup()
+    render_test_case_generator()
+    render_test_plan_generator()
+    
     # Bug log
     st.divider()
     st.subheader("🐛 Bug Log")
@@ -885,6 +1563,9 @@ def render_validation_tab():
         st.dataframe(bugs, use_container_width=True)
     else:
         st.info("No bugs logged yet")
+    
+    # Attachments section
+    render_attachments_section("validation")
 
 
 # ============================================================================
@@ -964,6 +1645,9 @@ def render_deployment_tab():
     st.divider()
     st.subheader("📚 Training Materials")
     st.info("💡 Upload training docs, videos, or user guides. In production, these would be stored in Azure Blob/SharePoint.")
+    
+    # Attachments section
+    render_attachments_section("deployment")
 
 
 # ============================================================================
@@ -1057,6 +1741,9 @@ def render_implementation_tab():
             update_progress()
             st.success("✅ Implementation data saved!")
             st.rerun()
+    
+    # Attachments section
+    render_attachments_section("implementation")
 
 
 # ============================================================================
@@ -1176,6 +1863,174 @@ def render_closing_tab():
         }
         
         st.info("💡 In production, this demand would be saved to historical_demands.json for RAG indexing")
+    
+    # Attachments section
+    render_attachments_section("closing")
+
+
+# ============================================================================
+# DEMANDS OVERVIEW PAGE
+# ============================================================================
+
+def render_demands_overview():
+    """Render the demands overview page with all demands."""
+    st.header("📂 All Demands")
+    st.caption("Browse, search, and manage all demands in the system")
+    
+    # Display success/error messages from demand loading
+    if hasattr(st.session_state, 'load_success_message'):
+        st.success(st.session_state.load_success_message)
+        del st.session_state.load_success_message
+    
+    if hasattr(st.session_state, 'load_error_message'):
+        st.error(st.session_state.load_error_message)
+        del st.session_state.load_error_message
+    
+    if hasattr(st.session_state, 'create_success_message'):
+        st.success(st.session_state.create_success_message)
+        del st.session_state.create_success_message
+    
+    # Action buttons at the top
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        search_query = st.text_input("🔍 Search demands", placeholder="Search by title, ID, or description...")
+    
+    with col2:
+        status_filter = st.selectbox("Filter by Status", 
+                                     ["All", "Draft", "In Progress", "Under Review", "Approved", "Rejected", "On Hold", "Completed", "Cancelled"])
+    
+    with col3:
+        if st.button("➕ Create New Demand", use_container_width=True, type="primary"):
+            new_id = create_new_demand()
+            st.rerun()
+    
+    st.divider()
+    
+    # Get all demands
+    all_demands = st.session_state.storage.get_all_demands_summary()
+    
+    # Apply filters
+    filtered_demands = all_demands
+    
+    if status_filter != "All":
+        filtered_demands = [d for d in filtered_demands if d.get('status') == status_filter]
+    
+    if search_query:
+        search_lower = search_query.lower()
+        filtered_demands = [d for d in filtered_demands if 
+                          search_lower in d.get('demand_id', '').lower() or
+                          search_lower in d.get('ideation', {}).get('title', '').lower() or
+                          search_lower in d.get('ideation', {}).get('description', '').lower()]
+    
+    # Display stats
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Demands", len(all_demands))
+    
+    with col2:
+        avg_progress = sum(d.get('progress_percentage', 0) for d in all_demands) / len(all_demands) if all_demands else 0
+        st.metric("Avg Progress", f"{avg_progress:.0f}%")
+    
+    with col3:
+        completed = len([d for d in all_demands if d.get('status') == 'Completed'])
+        st.metric("Completed", completed)
+    
+    with col4:
+        in_progress = len([d for d in all_demands if d.get('status') == 'In Progress'])
+        st.metric("In Progress", in_progress)
+    
+    st.divider()
+    
+    # Display demands
+    if not filtered_demands:
+        st.info("No demands found matching your criteria.")
+    else:
+        # Sort by last modified (most recent first)
+        filtered_demands = sorted(filtered_demands, 
+                                 key=lambda x: x.get('last_modified', ''), 
+                                 reverse=True)
+        
+        for demand in filtered_demands:
+            demand_id = demand.get('demand_id', 'Unknown')
+            demand_name = demand.get('demand_name', '')
+            demand_number = demand.get('demand_number', '')
+            title = demand.get('ideation', {}).get('title', 'Untitled')
+            description = demand.get('ideation', {}).get('description', 'No description')
+            status = demand.get('status', 'Draft')
+            progress = demand.get('progress_percentage', 0)
+            last_modified = demand.get('last_modified', '')
+            
+            # Parse last modified
+            try:
+                if isinstance(last_modified, str):
+                    last_modified_dt = datetime.fromisoformat(last_modified)
+                    last_modified_str = last_modified_dt.strftime("%Y-%m-%d %H:%M")
+                else:
+                    last_modified_str = str(last_modified)
+            except:
+                last_modified_str = str(last_modified)
+            
+            # Status color
+            status_colors = {
+                'Draft': '🔵',
+                'In Progress': '🟡',
+                'Under Review': '🟠',
+                'Approved': '🟢',
+                'Rejected': '🔴',
+                'On Hold': '⚪',
+                'Completed': '✅',
+                'Cancelled': '⚫'
+            }
+            status_icon = status_colors.get(status, '⚪')
+            
+            # Current demand indicator
+            is_current = (demand_id == st.session_state.demand_id)
+            current_badge = " **[CURRENT]**" if is_current else ""
+            
+            # Display name - use demand name/number if available, otherwise title
+            if demand_name and demand_number:
+                display_name = f"{demand_number} - {demand_name}"
+            elif demand_name:
+                display_name = demand_name
+            elif title and title != 'Untitled':
+                display_name = title
+            else:
+                display_name = demand_id
+            
+            # Create demand card
+            with st.container():
+                col1, col2, col3 = st.columns([3, 1, 1])
+                
+                with col1:
+                    st.markdown(f"### {status_icon} {display_name}{current_badge}")
+                    st.caption(f"**ID:** {demand_id}")
+                    if demand_number or demand_name:
+                        if demand_number:
+                            st.caption(f"**Number:** {demand_number}")
+                        if title and title != 'Untitled':
+                            st.caption(f"**Title:** {title}")
+                    st.caption(f"**Description:** {description[:150]}{'...' if len(description) > 150 else ''}")
+                
+                with col2:
+                    st.metric("Progress", f"{progress}%")
+                    st.caption(f"Status: **{status}**")
+                
+                with col3:
+                    st.caption(f"Modified: {last_modified_str}")
+                    
+                    if not is_current:
+                        if st.button(f"📂 Load", key=f"load_{demand_id}", use_container_width=True):
+                            if load_demand_by_id(demand_id):
+                                st.rerun()
+                    else:
+                        st.info("Active")
+                
+                # Progress bar
+                st.progress(progress / 100)
+                
+                st.divider()
 
 
 # ============================================================================
@@ -1293,8 +2148,9 @@ def main():
     # Render sidebar
     render_sidebar()
     
-    # Main tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    # Main tabs - Add Demands Overview as first tab, Timeline as last
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+        "📂 All Demands",
         "💡 Ideation",
         "📋 Requirements",
         "📊 Assessment",
@@ -1303,8 +2159,12 @@ def main():
         "🧪 Validation",
         "🚀 Deployment",
         "📈 Implementation",
-        "🎯 Closing"
+        "🎯 Closing",
+        "📅 Timeline"
     ])
+    
+    with tab0:
+        render_demands_overview()
     
     with tab1:
         render_ideation_tab()
@@ -1332,6 +2192,9 @@ def main():
     
     with tab9:
         render_closing_tab()
+    
+    with tab10:
+        render_gantt_tab()
     
     # Global actions
     render_global_actions()

@@ -44,6 +44,10 @@ env/
 *.env
 !.env.example
 
+# Data storage (user demands)
+data/
+*.json
+
 # Test coverage
 .coverage
 htmlcov/

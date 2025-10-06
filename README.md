@@ -9,11 +9,14 @@ A production-ready Streamlit application for managing IT demands from ideation t
 ### Core Capabilities
 - **9-Phase Demand Lifecycle**: Ideation → Requirements → Assessment → Design → Build → Validation → Deployment → Implementation → Closing
 - **AI Co-Pilot**: Context-aware assistance for problem analysis, user stories, risk prediction, and test case generation
+- **AI-Powered Test Case Generation**: Automatically generate manual and automated test cases from requirements and design ⭐ NEW
+- **JIRA Test Integration**: Upload AI-generated test cases directly to JIRA with test plan management ⭐ NEW
+- **AI Document Reading**: Extract text from PDFs, Word docs, Excel files, and web pages for AI context ⭐ NEW
+- **Interactive Gantt Charts**: Visualize demand timeline with Plotly-based interactive charts ⭐ NEW
 - **Stakeholder Management**: Track power/interest matrix, roles, and sign-offs
 - **Progress Tracking**: Automatic calculation based on tab completion
 - **Audit Logging**: Full change history with timestamps and trace IDs
 - **Multi-Format Export**: JSON, Markdown, and PDF-ready HTML exports
-- **JIRA Integration**: Mock and real API support for epic/story creation
 - **Confluence Integration**: Document export capabilities
 - **Session Management**: TTL-based with warning system
 - **Security**: Input validation, HTML escaping, sanitization
@@ -25,10 +28,11 @@ A production-ready Streamlit application for managing IT demands from ideation t
 3. **📊 Assessment**: Business case, ROI calculator, risks, dependencies
 4. **🎨 Design**: Architecture, tech stack, data models, security
 5. **🔨 Build**: Task tracking, sprint planning, JIRA integration
-6. **🧪 Validation**: Test cases, bug log, QA sign-off
+6. **🧪 Validation**: Test cases, AI test generation, JIRA test upload, bug log, QA sign-off ⭐ ENHANCED
 7. **🚀 Deployment**: Rollout plans, environment config, training materials
 8. **📈 Implementation**: Metrics dashboard, issue tracking, user feedback
 9. **🎯 Closing**: Retrospective, lessons learned, stakeholder sign-offs
+10. **📅 Timeline**: Interactive Gantt charts with milestones and progress visualization ⭐ NEW
 
 ## 🚀 Quick Start
 
@@ -65,26 +69,43 @@ streamlit run app.py
 
 ```
 DemandForge/
-├── app.py                      # Main Streamlit application
+├── app.py                      # Main Streamlit application (2,000+ lines)
 ├── requirements.txt            # Python dependencies
 ├── .env.example               # Environment variables template
+├── README.md                  # This file
+├── JIRA_INTEGRATION_GUIDE.md  # JIRA test case integration guide ⭐ NEW
+├── JIRA_IMPLEMENTATION_SUMMARY.md  # Technical implementation details ⭐ NEW
+├── JIRA_ARCHITECTURE.md       # Architecture diagrams ⭐ NEW
+├── OPTION4_COMPLETE.md        # AI document reading & Gantt features ⭐ NEW
+├── TEST_GUIDE.md              # Testing instructions ⭐ NEW
 ├── models/
 │   ├── __init__.py
 │   └── demand.py              # Pydantic models for all tabs
 ├── agents/
 │   ├── __init__.py
 │   ├── base_agent.py          # Abstract agent interface
-│   └── mock_agent.py          # Mock AI agent implementation
+│   ├── mock_agent.py          # Mock AI agent implementation
+│   └── gemini_agent.py        # Gemini 2.5 Flash integration ⭐ NEW
 ├── integrations/
 │   ├── __init__.py
-│   ├── jira_client.py         # JIRA API integration
+│   ├── jira_client.py         # JIRA API integration (Build phase)
+│   ├── jira_test_client.py    # JIRA test case integration ⭐ NEW
 │   └── confluence_client.py   # Confluence API integration
+├── components/
+│   ├── __init__.py
+│   └── jira_test_ui.py        # JIRA test UI components ⭐ NEW
 ├── utils/
 │   ├── __init__.py
 │   ├── progress.py            # Progress calculation
 │   ├── export.py              # Export to JSON/Markdown/PDF
 │   ├── validation.py          # Security and validation
-│   └── logging_config.py      # Structured logging
+│   ├── logging_config.py      # Structured logging
+│   ├── storage.py             # JSON file storage
+│   ├── document_reader.py     # AI document reading ⭐ NEW
+│   └── gantt_chart.py         # Interactive Gantt charts ⭐ NEW
+├── data/                      # Demand storage (JSON files)
+│   ├── demands_index.json     # Fast lookup index
+│   └── demands/               # Individual demand files
 └── tests/
     ├── __init__.py
     ├── test_agent.py          # Agent tests
@@ -154,6 +175,77 @@ To enable real API calls (instead of mocks):
 4. **Track progress** - Progress bar updates automatically
 5. **Export anytime** - JSON for data, Markdown for reports
 
+### 🤖 AI Test Case Generation (NEW!)
+
+**Automatically generate and upload test cases to JIRA:**
+
+1. **Setup JIRA Connection** (one-time):
+   - Go to Validation tab
+   - Expand "🔗 JIRA Connection Setup"
+   - Get your API token from https://id.atlassian.com/manage-profile/security/api-tokens
+   - Enter JIRA URL, email, token, and project key
+   - Click "Save & Test Connection"
+
+2. **Generate Manual Test Cases**:
+   - Fill in Requirements tab first (user stories, acceptance criteria)
+   - Go to Validation → "📝 Manual Test Cases"
+   - Set number of test cases (1-20)
+   - Choose default priority
+   - Click "🤖 Generate Manual Test Cases"
+   - Review and edit generated tests
+   - Click "📤 Upload All to JIRA"
+
+3. **Generate Automated Test Cases**:
+   - Fill in Design tab first (architecture, tech stack)
+   - Go to Validation → "⚙️ Automated Test Cases"
+   - Choose test framework (pytest, selenium, etc.)
+   - Set number of test cases (1-30)
+   - Click "🤖 Generate Automated Test Cases"
+   - Review test code snippets
+   - Click "📤 Upload All to JIRA"
+
+4. **Create Test Plan**:
+   - Generate test cases first (manual and/or automated)
+   - Scroll to "📋 Test Plan Generator"
+   - Enter test plan name and description
+   - Enable "Generate AI Test Strategy" for comprehensive plan
+   - Click "📋 Create Test Plan in JIRA"
+   - Test plan is created as an Epic in JIRA
+
+**See [JIRA_INTEGRATION_GUIDE.md](JIRA_INTEGRATION_GUIDE.md) for detailed instructions.**
+
+### 📄 AI Document Reading (NEW!)
+
+**Extract text from documents for AI context:**
+
+- **Supported formats**: PDF, Word (.docx), Excel (.xlsx), Images (metadata), URLs
+- **How to use**:
+  1. Go to any phase tab (Requirements, Design, etc.)
+  2. Scroll to "Attachments" section
+  3. Upload files or add URLs
+  4. Files are automatically read when using AI assistant
+  5. Click "Ask AI about attachments" for document-specific questions
+
+**Examples:**
+- Upload requirements PDF → AI generates test cases from it
+- Add API documentation URL → AI generates automated tests
+- Upload design diagrams → AI analyzes architecture
+
+### 📅 Interactive Timeline (NEW!)
+
+**Visualize your demand timeline:**
+
+1. Go to **Timeline** tab (new 10th tab)
+2. View three visualization types:
+   - **Timeline View**: Gantt chart with all 9 phases
+   - **Milestones View**: Key deliverables with diamond markers
+   - **Progress View**: Horizontal bar chart of completion %
+3. Customize:
+   - Set project start date
+   - Adjust phase durations
+   - Add custom milestones
+4. Export timeline as image or interactive HTML
+
 ### AI Co-Pilot Commands
 
 The AI assistant responds to:
@@ -163,6 +255,8 @@ The AI assistant responds to:
 - "Create test cases" → Test scenarios from requirements
 - "Suggest architecture" → Design patterns and best practices
 - "Help with estimation" → Effort and cost guidance
+- "Summarize this document" → Extract key points from attachments
+- "Generate automated tests" → Code-based test cases
 
 ### Best Practices
 
